@@ -3,7 +3,8 @@ TEMPLATE = app
 QT += qml quick websockets network
 
 SOURCES += main.cpp \
-    client.cpp
+    client.cpp \
+    node.cpp
 
 RESOURCES += qml.qrc
 
@@ -14,4 +15,5 @@ QML_IMPORT_PATH =
 include(deployment.pri)
 
 HEADERS += \
-    client.h
+    client.h \
+    node.h

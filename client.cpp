@@ -1,4 +1,5 @@
 #include "client.h"
+#include "node.h"
 
 #include <QWebSocket>
 #include <QAbstractSocket>
@@ -9,11 +10,61 @@
 #include <QQmlContext>
 #include <QHash>
 
+Camera::Camera(QObject *parent)
+: QObject(parent)
+, m_x(0)
+, m_y(0)
+, m_zoom(0)
+{
+}
+
+float Camera::x() const
+{
+    return m_x;
+}
+
+void Camera::setX(float x)
+{
+    if (m_x == x)
+        return;
+
+    m_x = x;
+    emit xChanged(x);
+}
+
+float Camera::y() const
+{
+    return m_y;
+}
+
+void Camera::setY(float y)
+{
+    if (m_y == y)
+        return;
+
+    m_y = y;
+    emit yChanged(y);
+}
+
+float Camera::zoom() const
+{
+    return m_zoom;
+}
+
+void Camera::setZoom(float zoom)
+{
+    if (m_zoom == zoom)
+        return;
+
+    m_zoom = zoom;
+    emit zoomChanged(zoom);
+}
+
 enum PacketType
 {
     UpdateNodes = 16,
     UpdatePositionAndSize = 17,
-    UpdateLoaderboard = 49,
+    UpdateLeaderboard = 49,
     SetBorder = 64
 };
 
@@ -49,6 +100,7 @@ public:
     Private(Client *q)
     : q(q)
     , ws("https://localhost")
+    , camera(this)
     {
         ws.ignoreSslErrors();
 
@@ -65,7 +117,7 @@ public:
     QRectF border;
     QPointer<QQmlComponent> nodeDelegate;
 
-    QPointer<QQuickItem> camera;
+    Camera camera;
 
     QHash<quint32, QQuickItem *> nodeMap;
 
@@ -75,9 +127,9 @@ public:
     void sendSpectate();
     void sendInit();
 
-    void updateCamera(float x, float y);
+    void updateCamera(float x, float y, float zoom);
 
-    QQuickItem *getOrCreateNode(quint32 id);
+    QQuickItem *getOrCreateNode(const NodeData &nd);
 
 public slots:
     void connected();
@@ -111,7 +163,6 @@ void Client::Private::parsePacket(QDataStream &stream)
                 }
             }
 
-            QList<NodeData> nodeDataList;
             while(true) {
                 NodeData nd;
 
@@ -147,15 +198,10 @@ void Client::Private::parsePacket(QDataStream &stream)
                 //quint16 endOfString;
                 //stream >> endOfString;
 
-                QQuickItem *item = getOrCreateNode(nd.id);
+                QQuickItem *item = getOrCreateNode(nd);
                 item->setPosition(QPointF(nd.x, nd.y));
                 item->setWidth(nd.radius*2);
                 item->setHeight(nd.radius*2);
-
-                item->setProperty("color", QColor(nd.r, nd.g, nd.b));
-                item->setProperty("name", nd.name);
-
-                nodeDataList.append(nd);
             }
 
             quint16 noIdea;
@@ -188,13 +234,11 @@ void Client::Private::parsePacket(QDataStream &stream)
             float x, y, zoom;
             stream >> x >> y >> zoom;
 
-            updateCamera(x, y);
-
-            //qDebug() << QString("Position changed: x=%1 y=%2 zoom=%3").arg(x).arg(y).arg(zoom);
+            updateCamera(x, y, zoom);
         }
         break;
 
-    case UpdateLoaderboard:
+    case UpdateLeaderboard:
         {
             quint32 number;
             stream >> number;
@@ -213,7 +257,7 @@ void Client::Private::parsePacket(QDataStream &stream)
                         name += QChar(c);
                 } while (c);
 
-                qDebug() << "Leaderboard:" << i << id << name;
+                //qDebug() << "Leaderboard:" << i << id << name;
             }
         }
         break;
@@ -266,30 +310,43 @@ void Client::Private::sendInit()
     ws.sendBinaryMessage(data);
 }
 
-void Client::Private::updateCamera(float x, float y)
+void Client::Private::updateCamera(float x, float y, float zoom)
 {
-    if (!camera) {
-        QQmlContext *context = qmlContext(q);
-
-        //camera = qobject_cast<QQuickItem *>(nodeDelegate->create(context));
-        //camera->setParentItem(boardItem);
-    }
-
-    //camera->setPosition(QPointF(x, y));
+    camera.setX(x);
+    camera.setY(y);
+    camera.setZoom(zoom);
 }
 
-QQuickItem *Client::Private::getOrCreateNode(quint32 id)
+QQuickItem *Client::Private::getOrCreateNode(const NodeData &nd)
 {
-    QQuickItem *item = nodeMap.value(id);
+    QQuickItem *item = nodeMap.value(nd.id);
 
     if (!item) {
-        QQmlContext *context = qmlContext(q);
+        QQmlContext *context = new QQmlContext(qmlContext(q));
 
-        //qDebug() << "Node" << id << "created";
+        Node *node = new Node;
+        node->setX(nd.x);
+        node->setY(nd.y);
+        node->setMass(nd.radius);
+        node->setColor(QColor(nd.r, nd.g, nd.b));
+        node->setFlags(nd.flags);
+        node->setName(nd.name);
+
+        context->setContextProperty("node", node);
+        context->setContextObject(node);
 
         item = qobject_cast<QQuickItem *>(nodeDelegate->create(context));
 
-        nodeMap.insert(id, item);
+        nodeMap.insert(nd.id, item);
+    } else {
+        Node *node = qvariant_cast<Node *>(qmlContext(item)->contextProperty("node"));
+
+        node->setX(nd.x);
+        node->setY(nd.y);
+        node->setMass(nd.radius);
+        node->setColor(QColor(nd.r, nd.g, nd.b));
+        node->setFlags(nd.flags);
+        //node->setName(name);
     }
 
     return item;
@@ -338,9 +395,19 @@ void Client::connectToHost(const QUrl &host)
     d->ws.open(host);
 }
 
+QQuickItem *Client::node(quint32 nodeId) const
+{
+    return d->nodeMap.value(nodeId);
+}
+
 QRectF Client::border() const
 {
     return d->border;
+}
+
+Camera *Client::camera() const
+{
+    return &d->camera;
 }
 
 void Client::setNodeDelegate(QQmlComponent *nodeDelegate)
@@ -358,5 +425,3 @@ QQmlComponent *Client::nodeDelegate() const
 }
 
 #include "client.moc"
-
-

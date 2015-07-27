@@ -10,17 +10,14 @@ Window {
     height: 360
 
     Component.onCompleted: {
-        client.connectToHost("ws://localhost:443")
+        client.connectToHost("ws://localhost:8002")
     }
 
-    Component {
-        id: nodeComponent
-
-        Rectangle {
+    Client {
+        id: client
+        nodeDelegate: Rectangle {
             parent: board
-            color: "red"
-
-            property string name
+            color: node.color
 
             transform: Translate {
                 x: -width/2
@@ -33,17 +30,12 @@ Window {
 
             Text {
                 anchors.centerIn: parent
-                text: parent.name
+                text: node.name
                 fontSizeMode: Text.Fit
                 color: "white"
                 font.pixelSize: parent.radius / 2
             }
         }
-    }
-
-    Client {
-        id: client
-        nodeDelegate: nodeComponent
     }
 
     Rectangle {
@@ -56,5 +48,17 @@ Window {
         scale: Math.min(root.width, root.height) / Math.min(width, height)
 
         anchors.centerIn: parent
+
+        Rectangle {
+            color: "red"
+            width: size
+            height: size
+            opacity: 0.3
+
+            property real size: client.camera.zoom * Math.max(board.width, board.height)
+
+            x: client.camera.x - size/2
+            y: client.camera.y - size/2
+        }
     }
 }
